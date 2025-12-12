@@ -1,0 +1,3 @@
+[submodule "logging-c"]
+	path = logging-c
+	url = https://github.com/Aciem-860/logging-c
