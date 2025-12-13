@@ -1,6 +1,6 @@
 CC = cc
 CFLAGS = -g -O3 -Iinclude -Ilogging-c
-LDFLAGS = -L/usr/lib -lSDL2 -lm
+LDFLAGS = -L/usr/lib -lSDL2 -lSDL2_image -lm
 TARGET = doom
 
 SRC = src/main.c src/sector.c src/player.c src/vector.c src/context.c

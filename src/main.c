@@ -38,7 +38,7 @@ static void update_keyboard(void)
 
 int main(void)
 {
-    init_logg(stdout, 1, ALL);
+    init_logg(stdout, 1, NONE);
     load_level("levels/level.map");
     init_position(&player_position, FOV, WIDTH);
     
@@ -78,6 +78,9 @@ int main(void)
 
     const SDL_Color WHITE = { 255, 255, 255, 255 };
     const SDL_Color BLACK = { 0, 0, 0, 255 };
+
+
+    init_texture(&context);
     
     //  MAIN LOOP  //
     while (1) {
@@ -121,8 +124,9 @@ int main(void)
         if (keyboard[SDL_SCANCODE_P]) {
             player_position.angle += 0.05;
         }
-
+        
         for (int w = 0; w < wall_number; w++) {
+        /* int w = 3; */
             set_color(context.renderer, colours[w]);
             render_wall(&walls[w], &player_position, &context);
         }

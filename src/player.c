@@ -2,9 +2,9 @@
 
 #include <math.h>
 
-struct position player_position;
+Position player_position;
 
-void init_position(struct position * p, double fov, double screen_width) {
+void init_position(Position * p, double fov, double screen_width) {
     p->x = 0.0;
     p->y = 0.0;
     p->angle = 0.0;
@@ -12,7 +12,7 @@ void init_position(struct position * p, double fov, double screen_width) {
     p->distance_to_screen = screen_width / (2 * tan(fov/2));
 }
 
-void move(struct position* p, double dx, double dy)
+void move(Position* p, double dx, double dy)
 {
     p->x += dx;
     p->y += dy;

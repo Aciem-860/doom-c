@@ -1,7 +1,11 @@
+#include <SDL2/SDL_render.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 #include <sys/param.h>
 
 #include "sector.h"
@@ -10,14 +14,22 @@
 #include "log.h"
 
 enum parser_state { SECTOR, WALL };
+enum wall_cut_side { INTACT, LEFT, RIGHT };
 
-struct sector sectors[10];
-struct wall walls[10];
+Sector sectors[10];
+Wall walls[10];
 
 int sector_number;
 int wall_number;
 
-void print_sector(struct sector * s)
+SDL_Texture *wall_texture;
+
+void init_texture(Context* context) {
+    wall_texture = IMG_LoadTexture(context->renderer, "img/wall.png");
+}
+
+
+void print_sector(Sector * s)
 {
     logg(DEBUG, "TAG : %d", s->tag);
     logg(DEBUG, "CELL_HEIGHT : %d", s->cell_height);
@@ -27,7 +39,7 @@ void print_sector(struct sector * s)
     logg(DEBUG, "WALLS_NUMBER : %d", s->walls_number);
 }
 
-void print_wall(struct wall * w)
+void print_wall(Wall * w)
 {
     logg(DEBUG, "START_X : %f", w->start_x);
     logg(DEBUG, "END_X : %f", w->end_x);
@@ -74,7 +86,7 @@ int load_level(const char* path)
         
         // Parsing the line
         if (state == SECTOR) {
-            struct sector sector;
+            Sector sector;
             while (token) {
                 switch (tok_id) {
                 case 0:
@@ -107,7 +119,7 @@ int load_level(const char* path)
         }
 
         if (state == WALL) {
-            struct wall wall;
+            Wall wall;
             while (token) {
                 double toki = atof(token);
                 switch (tok_id) {
@@ -149,18 +161,21 @@ int load_level(const char* path)
     return 0;
 }
 
-static const double wall_height_real = 10.0; // TODO: remplacer par valeur du secteur
+static const double wall_height_real = 40.0; // TODO: remplacer par valeur du secteur
 
-static void render_col(Context* context, int x, int wh) {
+static void render_col(Context* context, int x, int wh, double percent) {
     if (wh > 0) {
-        if (wh > context->height) {
-            wh = context->height;
-        }
-        SDL_RenderDrawLine(context->renderer,
-                           x,
-                           context->height / 2 - wh,
-                           x,
-                           context->height / 2 + wh);
+        /* if (percent < 0) percent = 0; */
+        /* else if (percent > 1) percent = 1; */
+        int texture_width;
+        int texture_height;
+        SDL_QueryTexture(wall_texture, NULL, NULL, &texture_width, &texture_height);
+        
+        int texture_col = (int) (percent * texture_width);       
+        SDL_Rect src_rect = { texture_col, 0, 1, texture_height };
+        SDL_Rect dst_rect = { x, (context->height -  wh)/2, 1, wh+1 };
+
+        SDL_RenderCopy(context->renderer, wall_texture, &src_rect, &dst_rect);
     }
 }
 
@@ -203,15 +218,16 @@ static int check_wall_distance_and_find_another(Wall* wall, Wall* actual_wall) {
         sx = wall->end_x;
         sy = wall->end_y;
         ex = wall->start_x;
-        ey = wall->start_y;        
+        ey = wall->start_y;
     } else {
         // Les deux sont OK, on n'a rien à faire
         memcpy(actual_wall, wall, sizeof(*wall));
         return 0;
     } 
     
-    double step = 0.1;
-    for (int i = 0; i < 11; i++) {
+    double step = 0.01;
+    int mx = (int) (1.0 / step);
+    for (int i = 0; i < mx + 1; i++) {
         double t = step * i; // t inclus dans [0,1]
         int x = (int) (sx + t * (ex - sx));
         int y = (int) (sy + t * (ey - sy));
@@ -228,7 +244,7 @@ static int check_wall_distance_and_find_another(Wall* wall, Wall* actual_wall) {
     return 1;    
 }
 
-void render_wall(struct wall *wall, struct position *camera, Context *context)
+void render_wall(Wall *wall, Position *camera, Context *context)
 {
     const double EPS = 1e-6;         // tolérance numérique
     
@@ -237,7 +253,7 @@ void render_wall(struct wall *wall, struct position *camera, Context *context)
     double sy = wall->start_y - camera->y;
     double ex = wall->end_x   - camera->x;
     double ey = wall->end_y   - camera->y;
-
+    
     // --- 2. Rotation : mettre la caméra dans l'axe X+ (direction caméra = (1,0)) ---
     rotate(sx, sy, -camera->angle, &sx, &sy);
     rotate(ex, ey, -camera->angle, &ex, &ey);
@@ -260,22 +276,23 @@ void render_wall(struct wall *wall, struct position *camera, Context *context)
     
     get_projection(actual_wall.start_x, actual_wall.start_y, camera->distance_to_screen, &sx_p, &start_wall_height);
     get_projection(actual_wall.end_x, actual_wall.end_y, camera->distance_to_screen, &ex_p, &end_wall_height);
-    
+
     // --- 5. Tracer le mur ---
-    int sx_d = sx_p + x_center;
-    int ex_d = ex_p + x_center;
-            
-    if (sx_d > ex_d) {
-        int t = sx_d;
-        sx_d = ex_d;
-        ex_d = t;
+
+    if (sx_p > ex_p) {
+        int t = sx_p;
+        sx_p = ex_p;
+        ex_p = t;
 
         t = start_wall_height;
         start_wall_height = end_wall_height;
         end_wall_height = t;
     }
 
-    int wall_width = ex_d - sx_d;
+    int sx_d = sx_p + x_center;
+    int ex_d = ex_p + x_center;
+    int wall_width = abs(ex_p - sx_p);
+
     if (wall_width <= 0) return;
     
     for (int col = 0; col < wall_width; col++) {
@@ -286,9 +303,17 @@ void render_wall(struct wall *wall, struct position *camera, Context *context)
         
         double wh = (((double) (col * (end_wall_height - start_wall_height)) / (double)(2 * wall_width)) + (double)start_wall_height / 2);
         
-        if (wh > (double) context->height/2) wh = context->width;
-        else if (wh < EPS) continue;
+        if (wh < EPS) continue;
         
-        render_col(context, screen_x, (int)(2*wh));
+        double x = camera->distance_to_screen;
+        double y = sx_p + col;
+        double wx = ex - sx;
+        double wy = ey - sy;
+
+        double det = x * wy - y * wx;
+        if (fabs(det) < 1e-9) return;
+
+        double u = (sx * y - sy * x) / det;
+        render_col(context, screen_x, (int)(2*wh), u);
     }
 }

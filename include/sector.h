@@ -1,16 +1,17 @@
 #ifndef SECTOR_H
 #define SECTOR_H
 
+#include <SDL2/SDL_image.h>
 #include "../include/context.h"
 #include "../include/player.h"
 
-typedef struct wall {
+typedef struct {
     double start_x, end_x;
     double start_y, end_y;
     int portal; // < 0 = solid wall ; > 0 == tag of the next sector
 } Wall;
 
-typedef struct sector {
+typedef struct {
     // Missing:
     // Ceiling texture
     // Floor texture
@@ -22,17 +23,20 @@ typedef struct sector {
     int walls_number;
 } Sector;
 
-extern struct sector sectors[10];
-extern struct wall walls[10];
+extern Sector sectors[10];
+extern Wall walls[10];
 
 extern int sector_number;
 extern int wall_number;
 
+extern SDL_Texture * wall_texture;
+
+void init_texture(Context* context);
 int load_level(const char *path);
 
-void print_sector(struct sector *);
-void print_wall(struct wall *);
+void print_sector(Sector *);
+void print_wall(Wall *);
 
-void render_wall(struct wall *, struct position *, Context *);
+void render_wall(Wall *, Position *, Context *);
 
 #endif
