@@ -21,8 +21,9 @@
 
 #define PLAYER_MOVE_STEP 1
 
-Context context;
+extern Position player_position;
 
+Context context;
 Uint8 keyboard[SDL_NUM_SCANCODES];
 
 static void update_keyboard(void)
@@ -41,7 +42,7 @@ int main(void)
     init_logg(stdout, 1, NONE);
     load_level("levels/level.map");
     init_position(&player_position, FOV, WIDTH);
-    
+
     int status = EXIT_FAILURE;
     if (0 != SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "Erreur SDL_Init: %s", SDL_GetError());
@@ -126,7 +127,6 @@ int main(void)
         }
         
         for (int w = 0; w < wall_number; w++) {
-        /* int w = 3; */
             set_color(context.renderer, colours[w]);
             render_wall(&walls[w], &player_position, &context);
         }
