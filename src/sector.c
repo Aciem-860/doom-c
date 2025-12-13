@@ -22,12 +22,30 @@ Wall walls[10];
 int sector_number;
 int wall_number;
 
-SDL_Texture *wall_texture;
+SDL_Texture *wall_bricks_texture;
+SDL_Texture *wall_stone_texture;
+SDL_Texture *wall_steel_texture;
+SDL_Texture *wall_blue_texture;
 
 void init_texture(Context* context) {
-    wall_texture = IMG_LoadTexture(context->renderer, "img/wall.png");
+    wall_bricks_texture = IMG_LoadTexture(context->renderer, "img/bricks.png");
+    wall_stone_texture = IMG_LoadTexture(context->renderer, "img/stone.png");
+    wall_steel_texture = IMG_LoadTexture(context->renderer, "img/steel.png");
+    wall_blue_texture = IMG_LoadTexture(context->renderer, "img/blue.png");
 }
 
+static SDL_Texture *get_wall_texture(WallType type) {
+    switch (type) {
+    case WALL_BRICKS:
+        return wall_bricks_texture;
+    case WALL_STONE:
+        return wall_stone_texture;
+    case WALL_STEEL:
+        return wall_steel_texture;
+    case WALL_BLUE:
+        return wall_blue_texture;
+    }
+}
 
 void print_sector(Sector * s)
 {
@@ -138,6 +156,9 @@ int load_level(const char* path)
                 case 4:
                     wall.portal = toki;
                     break;
+                case 5:
+                    wall.wall_type = toki;
+                    break;
                 default:
                     continue;
                 }
@@ -163,12 +184,13 @@ int load_level(const char* path)
 
 static const double wall_height_real = 40.0; // TODO: remplacer par valeur du secteur
 
-static void render_col(Context* context, int x, int wh, double percent) {
+static void render_col(Context* context, int x, int wh, double percent, WallType wall_type) {
     if (wh > 0) {
         /* if (percent < 0) percent = 0; */
         /* else if (percent > 1) percent = 1; */
         int texture_width;
         int texture_height;
+        SDL_Texture* wall_texture = get_wall_texture(wall_type);
         SDL_QueryTexture(wall_texture, NULL, NULL, &texture_width, &texture_height);
         
         int texture_col = (int) (percent * texture_width);       
@@ -314,6 +336,6 @@ void render_wall(Wall *wall, Position *camera, Context *context)
         if (fabs(det) < 1e-9) return;
 
         double u = (sx * y - sy * x) / det;
-        render_col(context, screen_x, (int)(2*wh), u);
+        render_col(context, screen_x, (int)(2*wh), u, wall->wall_type);
     }
 }

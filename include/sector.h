@@ -5,10 +5,19 @@
 #include "../include/context.h"
 #include "../include/player.h"
 
+typedef enum {
+    WALL_BRICKS,
+    WALL_STONE,
+    WALL_STEEL,
+    WALL_BLUE
+} WallType;
+
+
 typedef struct {
     double start_x, end_x;
     double start_y, end_y;
     int portal; // < 0 = solid wall ; > 0 == tag of the next sector
+    WallType wall_type;
 } Wall;
 
 typedef struct {
@@ -28,8 +37,6 @@ extern Wall walls[10];
 
 extern int sector_number;
 extern int wall_number;
-
-extern SDL_Texture * wall_texture;
 
 void init_texture(Context* context);
 int load_level(const char *path);
