@@ -184,16 +184,19 @@ int load_level(const char* path)
 
 static const double wall_height_real = 40.0; // TODO: remplacer par valeur du secteur
 
-static void render_col(Context* context, int x, int wh, double percent, WallType wall_type) {
+static void render_col(Context *context, int x, int wh, int ww,
+                       double percent, WallType wall_type)
+{
     if (wh > 0) {
-        /* if (percent < 0) percent = 0; */
-        /* else if (percent > 1) percent = 1; */
         int texture_width;
         int texture_height;
         SDL_Texture* wall_texture = get_wall_texture(wall_type);
         SDL_QueryTexture(wall_texture, NULL, NULL, &texture_width, &texture_height);
         
-        int texture_col = (int) (percent * texture_width);       
+        int wall_col = (int) (percent * ww);
+
+        int texture_col = wall_col % texture_width;
+        
         SDL_Rect src_rect = { texture_col, 0, 1, texture_height };
         SDL_Rect dst_rect = { x, (context->height -  wh)/2, 1, wh+1 };
 
@@ -316,6 +319,11 @@ void render_wall(Wall *wall, Position *camera, Context *context)
     int wall_width = abs(ex_p - sx_p);
 
     if (wall_width <= 0) return;
+
+    double wx = ex - sx;
+    double wy = ey - sy;
+
+    double real_wall_width = sqrt(wx * wx + wy * wy);
     
     for (int col = 0; col < wall_width; col++) {
         int screen_x = col + sx_d;
@@ -329,13 +337,12 @@ void render_wall(Wall *wall, Position *camera, Context *context)
         
         double x = camera->distance_to_screen;
         double y = sx_p + col;
-        double wx = ex - sx;
-        double wy = ey - sy;
+
 
         double det = x * wy - y * wx;
         if (fabs(det) < 1e-9) return;
 
         double u = (sx * y - sy * x) / det;
-        render_col(context, screen_x, (int)(2*wh), u, wall->wall_type);
+        render_col(context, screen_x, (int)(2*wh), real_wall_width, u, wall->wall_type);
     }
 }
