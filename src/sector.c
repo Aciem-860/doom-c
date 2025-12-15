@@ -1,4 +1,6 @@
 #include <SDL2/SDL_render.h>
+#include <SDL2/SDL_pixels.h>
+#include <SDL2/SDL_stdinc.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -13,7 +15,6 @@
 #include "context.h"
 #include "log.h"
 
-
 #define swap(x, y) do {                         \
         (x) ^= (y);                             \
         (y) ^= (x);                             \
@@ -21,6 +22,7 @@
     } while(0)
 
 const double NEAR_PLANE = 1.0;
+double tan_fov;
 
 enum parser_state { SECTOR, WALL };
 enum wall_cut_side { INTACT, LEFT, RIGHT };
@@ -35,12 +37,80 @@ SDL_Texture *wall_bricks_texture;
 SDL_Texture *wall_stone_texture;
 SDL_Texture *wall_steel_texture;
 SDL_Texture *wall_blue_texture;
+SDL_Texture *floor_texture;
+
+Uint32 floor_pixels [64 * 64];
+
+static Uint32 get_pixel(SDL_Surface* surface, int x, int y) {
+    if (SDL_MUSTLOCK(surface)) {
+        SDL_LockSurface(surface);
+    }
+
+    int bpp = surface->format->BytesPerPixel;
+    Uint8* p = (Uint8*)surface->pixels + y * surface->pitch + x * bpp;
+    Uint32 pixel;
+
+    switch (bpp) {
+    case 1:
+        pixel = *p;
+        break;
+    case 2:
+        pixel = *(Uint16*)p;
+        break;
+    case 3:
+        if (SDL_BYTEORDER == SDL_BIG_ENDIAN) {
+            pixel = p[0] << 16 | p[1] << 8 | p[2];
+        } else {
+            pixel = p[0] | p[1] << 8 | p[2] << 16;
+        }
+        break;
+    case 4:
+        pixel = *(Uint32*)p;
+        break;
+    default:
+        pixel = 0; // Format not handled
+        break;
+    }
+
+    if (SDL_MUSTLOCK(surface)) {
+        SDL_UnlockSurface(surface);
+    }
+    return pixel;
+}
+
+static Uint32 correct_pixel(Uint32 pixel, SDL_Surface* surface) {
+    Uint8 r, g, b;
+    SDL_GetRGB(pixel, surface->format, &r, &g, &b);
+    Uint32 ret = b + (g << 8) + (r << 16);
+    return ret;
+}
 
 void init_texture(Context* context) {
     wall_bricks_texture = IMG_LoadTexture(context->renderer, "img/bricks.png");
-    wall_stone_texture = IMG_LoadTexture(context->renderer, "img/stone.png");
-    wall_steel_texture = IMG_LoadTexture(context->renderer, "img/steel.png");
-    wall_blue_texture = IMG_LoadTexture(context->renderer, "img/blue.png");
+    wall_stone_texture  = IMG_LoadTexture(context->renderer, "img/stone.png");
+    wall_steel_texture  = IMG_LoadTexture(context->renderer, "img/steel.png");
+    wall_blue_texture   = IMG_LoadTexture(context->renderer, "img/blue.png");
+
+    SDL_Surface* floor_surface = IMG_Load("img/floor.png");
+
+    for (int x = 0; x < 64; x++) {
+        for (int y = 0; y < 64; y++) {
+            Uint32 pixel = get_pixel(floor_surface, x, y);
+            pixel = correct_pixel(pixel, floor_surface);
+            floor_pixels[x + 64 * y] = pixel;
+        }
+    }
+    
+    floor_texture = SDL_CreateTextureFromSurface(context->renderer, floor_surface);
+    SDL_FreeSurface(floor_surface);
+}
+
+void free_texture() {
+    SDL_DestroyTexture(wall_bricks_texture);
+    SDL_DestroyTexture(wall_stone_texture);
+    SDL_DestroyTexture(wall_steel_texture);
+    SDL_DestroyTexture(wall_blue_texture);
+    SDL_DestroyTexture(floor_texture);
 }
 
 static SDL_Texture *get_wall_texture(WallType type) {
@@ -191,6 +261,24 @@ int load_level(const char* path)
     return 0;
 }
 
+// Question : ne vaut-il pas mieux charger la texture entièrement puis adresser
+// un buffer ?
+static Uint32 get_pixel_from_texture(SDL_Texture *texture, int x, int y) {
+    void* pixels;
+    int pitch;
+
+    SDL_LockTexture(texture, NULL, &pixels, &pitch);
+
+    Uint8* base = (Uint8*)pixels;
+    Uint32* row = (Uint32*)(base + y * pitch);
+    Uint32 color = row[x];
+    printf("COLOR = %d\n", color);
+
+    SDL_UnlockTexture(texture);
+
+    return color;
+}
+
 static const double wall_height_real = 50.0; // TODO: remplacer par valeur du secteur
 
 static void render_col(Context *context, int x, int wh, int ww,
@@ -211,6 +299,59 @@ static void render_col(Context *context, int x, int wh, int ww,
         SDL_Rect dst_rect = { x, (context->height -  wh)/2, 1, wh+1 };
 
         SDL_RenderCopy(context->renderer, wall_texture, &src_rect, &dst_rect);
+    }
+}
+
+
+void render_floor(Context* context, Position* camera) {
+    int texture_width, texture_height;
+    SDL_QueryTexture(floor_texture, NULL, NULL, &texture_width, &texture_height);
+
+    for (int line = context->height/2+1; line < context->height; line++) {
+
+        SDL_Texture* tex_floor_strip = SDL_CreateTexture(context->renderer,
+                                                         SDL_PIXELFORMAT_ARGB8888,
+                                                         SDL_TEXTUREACCESS_TARGET,
+                                                         context->width, 1);
+        Uint32 pixels_buffer[context->width];
+        double z_pos = 50 * (double) context->height;
+        double y = (double) line - (double) context->height/2; // y > 0
+
+        // --- Rayons gauche et droit ---
+        double xl, yl;
+        double xr, yr;
+        double distance_row = z_pos / y;
+
+        // Positions des rayons dans le monde réel
+        //  => différent du monde de projection
+        xl = distance_row;
+        xr = distance_row;
+
+        yl = tan_fov * distance_row;
+        yr = -yl;
+
+        // Taille du rayon perpendiculaire à la
+        // direction de regard (rayon du faisceau)
+        double ray_width = yr - yl;
+        double t = ray_width / (double) context->width;
+
+        for (int x = 0; x < context->width; x++) {
+            int ray_w = yl + x * t;
+
+            int tex_w = abs(ray_w % texture_width);
+            int tex_h = ((int) y) % texture_height;
+            pixels_buffer[x] = floor_pixels[tex_w + texture_width * tex_h];
+        }
+
+        SDL_SetRenderTarget(context->renderer, tex_floor_strip);
+        SDL_UpdateTexture(tex_floor_strip, NULL, pixels_buffer, context->width * sizeof(Uint32));
+        
+        SDL_Rect dst_area = {0, line, context->width, 1};
+        
+        SDL_SetRenderTarget(context->renderer, NULL);
+        SDL_RenderCopy(context->renderer, tex_floor_strip, NULL, &dst_area);
+        SDL_DestroyTexture(tex_floor_strip);
+
     }
 }
 

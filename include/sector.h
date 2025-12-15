@@ -5,6 +5,9 @@
 #include "../include/context.h"
 #include "../include/player.h"
 
+
+extern double tan_fov;
+
 typedef enum {
     WALL_BRICKS,
     WALL_STONE,
@@ -38,12 +41,14 @@ extern Wall walls[10];
 extern int sector_number;
 extern int wall_number;
 
-void init_texture(Context* context);
+void init_texture(Context *context);
+void free_texture();
 int load_level(const char *path);
 
 void print_sector(Sector *);
 void print_wall(Wall *);
 
 void render_wall(Wall *, Position *, Context *);
+void render_floor(Context* context, Position* camera);
 
 #endif

@@ -6,6 +6,7 @@
 #include <SDL2/SDL_scancode.h>
 #include <SDL2/SDL_stdinc.h>
 #include <SDL2/SDL_video.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -42,6 +43,7 @@ int main(void)
     init_logg(stdout, 1, NONE);
     load_level("levels/level.map");
     init_position(&player_position, FOV, WIDTH);
+    tan_fov = tan(FOV/2);
 
     int status = EXIT_FAILURE;
     if (0 != SDL_Init(SDL_INIT_VIDEO)) {
@@ -126,6 +128,8 @@ int main(void)
             player_position.angle += 0.05;
         }
         
+        render_floor(&context, &player_position);
+        
         for (int w = 0; w < wall_number; w++) {
             set_color(context.renderer, colours[w]);
             render_wall(&walls[w], &player_position, &context);
@@ -138,10 +142,13 @@ int main(void)
     status = EXIT_SUCCESS;
 
  Quit:
-    if (context.renderer)
+    if (context.renderer) {
+        free_texture();
         SDL_DestroyRenderer(context.renderer);
+    }
     if (context.window)
         SDL_DestroyWindow(context.window);
+
     
     SDL_Quit();
     return status;
