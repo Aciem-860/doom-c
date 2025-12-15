@@ -306,15 +306,17 @@ static void render_col(Context *context, int x, int wh, int ww,
 void render_floor(Context* context, Position* camera) {
     int texture_width, texture_height;
     SDL_QueryTexture(floor_texture, NULL, NULL, &texture_width, &texture_height);
+    SDL_Texture* tex_floor_strip = SDL_CreateTexture(context->renderer,
+                                                     SDL_PIXELFORMAT_ARGB8888,
+                                                     SDL_TEXTUREACCESS_TARGET,
+                                                     context->width,
+                                                     context->height/2);
 
+    Uint32 pixels_buffer[context->width * context->height/2];
+    double z_pos = 19 * (double) context->height;
+    
     for (int line = context->height/2+1; line < context->height; line++) {
 
-        SDL_Texture* tex_floor_strip = SDL_CreateTexture(context->renderer,
-                                                         SDL_PIXELFORMAT_ARGB8888,
-                                                         SDL_TEXTUREACCESS_TARGET,
-                                                         context->width, 1);
-        Uint32 pixels_buffer[context->width];
-        double z_pos = 50 * (double) context->height;
         double y = (double) line - (double) context->height/2; // y > 0
 
         // --- Rayons gauche et droit ---
@@ -330,29 +332,43 @@ void render_floor(Context* context, Position* camera) {
         yl = tan_fov * distance_row;
         yr = -yl;
 
+        rotate(xl, yl, -camera->angle, &xl, &yl);
+        rotate(xr, yr, -camera->angle, &xr, &yr);
+
+        xl += camera->x;
+        xr += camera->x;
+        yr -= camera->y;
+        yl -= camera->y;
+        
+
         // Taille du rayon perpendiculaire à la
         // direction de regard (rayon du faisceau)
-        double ray_width = yr - yl;
-        double t = ray_width / (double) context->width;
 
+        double step_x = (xr - xl) / context->width;
+        double step_y = (yr - yl) / context->width;
+        
         for (int x = 0; x < context->width; x++) {
-            int ray_w = yl + x * t;
 
-            int tex_w = abs(ray_w % texture_width);
-            int tex_h = ((int) y) % texture_height;
-            pixels_buffer[x] = floor_pixels[tex_w + texture_width * tex_h];
+            int x_ray = (int)(xl + x * step_x) % texture_width;
+            int y_ray = (int)(yl + x * step_y) % texture_height;
+
+            if (x_ray < 0) x_ray = (texture_width - x_ray) % texture_width;
+            if (y_ray < 0) y_ray = (texture_height - y_ray) % texture_height;
+
+            /* printf("X RAY = %d, Y RAY = %d\n", x_ray, y_ray); */
+
+            pixels_buffer[x + context->width * (int) y] = floor_pixels[x_ray + texture_width * y_ray];
         }
-
-        SDL_SetRenderTarget(context->renderer, tex_floor_strip);
-        SDL_UpdateTexture(tex_floor_strip, NULL, pixels_buffer, context->width * sizeof(Uint32));
-        
-        SDL_Rect dst_area = {0, line, context->width, 1};
-        
-        SDL_SetRenderTarget(context->renderer, NULL);
-        SDL_RenderCopy(context->renderer, tex_floor_strip, NULL, &dst_area);
-        SDL_DestroyTexture(tex_floor_strip);
-
     }
+    
+    SDL_SetRenderTarget(context->renderer, tex_floor_strip);
+    SDL_UpdateTexture(tex_floor_strip, NULL, pixels_buffer,
+                      sizeof(Uint32) * context->width);
+    SDL_Rect dst_area = {0, context->height/2, context->width, context->height/2};
+        
+    SDL_SetRenderTarget(context->renderer, NULL);
+    SDL_RenderCopy(context->renderer, tex_floor_strip, NULL, &dst_area);
+    SDL_DestroyTexture(tex_floor_strip);        
 }
 
 static int get_projection(double x,

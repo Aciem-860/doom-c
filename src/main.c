@@ -6,6 +6,7 @@
 #include <SDL2/SDL_scancode.h>
 #include <SDL2/SDL_stdinc.h>
 #include <SDL2/SDL_video.h>
+#include <SDL2/SDL_ttf.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,7 +19,8 @@
 
 #define HEIGHT 720
 #define WIDTH 1080
-#define FOV (90*M_PI/180)
+#define FOV (90 * M_PI / 180)
+#define FONT_PATH "res/DooM.ttf"
 
 #define PLAYER_MOVE_STEP 1
 
@@ -26,6 +28,8 @@ extern Position player_position;
 
 Context context;
 Uint8 keyboard[SDL_NUM_SCANCODES];
+
+TTF_Font *SansFont;
 
 static void update_keyboard(void)
 {
@@ -82,11 +86,35 @@ int main(void)
     const SDL_Color WHITE = { 255, 255, 255, 255 };
     const SDL_Color BLACK = { 0, 0, 0, 255 };
 
+    if (TTF_Init()) {
+        fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
+        goto Quit;
+    }
+        
+    SansFont = TTF_OpenFont(FONT_PATH, 24);
+    if (SansFont == NULL) {
+        fprintf(stderr, "TTF_OpenFont failed: %s\n", TTF_GetError());
+        goto Quit;
+    }
+    SDL_Color Yellow ={ 0xff, 0xff, 0x00 };
 
+    SDL_Rect rect_message = {
+        0, 0, 100, 25
+    };
+    
     init_texture(&context);
+
+    int frames = 0;
+    int fps;
+    Uint32 last_time = SDL_GetTicks();
+    Uint32 current_time;
+    Uint32 frame_start;
+    
+    const Uint32 target_delay = 1000 / 60; // 60 Hz
     
     //  MAIN LOOP  //
     while (1) {
+        frame_start = SDL_GetTicks();
         SDL_RenderClear(context.renderer);
 
         set_color(context.renderer, WHITE);
@@ -134,9 +162,36 @@ int main(void)
             set_color(context.renderer, colours[w]);
             render_wall(&walls[w], &player_position, &context);
         }
+
+        /// PRINT FPS ///
+        current_time = SDL_GetTicks();
+        frames++;
+        if (current_time - last_time > 1000) {
+            fps = frames * 1000.0f / (current_time - last_time);
+            frames = 0;
+            last_time = current_time;
+        }
+        char buffer[64];
+        sprintf(buffer, "FPS: %d", fps);
+        
+        SDL_Surface *surface_message = TTF_RenderText_Solid(SansFont, buffer, Yellow);
+        SDL_Texture *texture_message = SDL_CreateTextureFromSurface(context.renderer, surface_message);
+        
+        SDL_RenderCopy(context.renderer, texture_message, NULL, &rect_message);
+    
+        SDL_FreeSurface(surface_message);
+        SDL_DestroyTexture(texture_message);
+        /// ---------- ///
+    
         set_color(context.renderer, BLACK);
         SDL_RenderPresent(context.renderer);
-        SDL_Delay(10);
+
+        Uint32 frame_time = SDL_GetTicks() - frame_start;
+        if (target_delay > frame_time) {
+            SDL_Delay(target_delay - frame_time);
+        }
+        
+        /* SDL_Delay(10); */
     }
     
     status = EXIT_SUCCESS;
@@ -148,7 +203,7 @@ int main(void)
     }
     if (context.window)
         SDL_DestroyWindow(context.window);
-
+    
     
     SDL_Quit();
     return status;
