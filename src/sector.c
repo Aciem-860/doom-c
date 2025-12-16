@@ -1,17 +1,19 @@
 #include <SDL2/SDL_render.h>
 #include <SDL2/SDL_pixels.h>
 #include <SDL2/SDL_stdinc.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_image.h>
+
 #include <sys/param.h>
 
 #include "sector.h"
 #include "player.h"
+#include "textures.h"
 #include "context.h"
 #include "log.h"
 
@@ -32,119 +34,9 @@ Wall walls[10];
 
 int sector_number;
 int wall_number;
-
-SDL_Texture *wall_bricks_texture;
-SDL_Texture *wall_stone_texture;
-SDL_Texture *wall_steel_texture;
-SDL_Texture *wall_blue_texture;
-SDL_Texture *floor_texture;
+int current_sector;
 
 Uint32 floor_pixels [64 * 64];
-
-static Uint32 get_pixel(SDL_Surface* surface, int x, int y) {
-    if (SDL_MUSTLOCK(surface)) {
-        SDL_LockSurface(surface);
-    }
-
-    int bpp = surface->format->BytesPerPixel;
-    Uint8* p = (Uint8*)surface->pixels + y * surface->pitch + x * bpp;
-    Uint32 pixel;
-
-    switch (bpp) {
-    case 1:
-        pixel = *p;
-        break;
-    case 2:
-        pixel = *(Uint16*)p;
-        break;
-    case 3:
-        if (SDL_BYTEORDER == SDL_BIG_ENDIAN) {
-            pixel = p[0] << 16 | p[1] << 8 | p[2];
-        } else {
-            pixel = p[0] | p[1] << 8 | p[2] << 16;
-        }
-        break;
-    case 4:
-        pixel = *(Uint32*)p;
-        break;
-    default:
-        pixel = 0; // Format not handled
-        break;
-    }
-
-    if (SDL_MUSTLOCK(surface)) {
-        SDL_UnlockSurface(surface);
-    }
-    return pixel;
-}
-
-static Uint32 correct_pixel(Uint32 pixel, SDL_Surface* surface) {
-    Uint8 r, g, b;
-    SDL_GetRGB(pixel, surface->format, &r, &g, &b);
-    Uint32 ret = b + (g << 8) + (r << 16);
-    return ret;
-}
-
-void init_texture(Context* context) {
-    wall_bricks_texture = IMG_LoadTexture(context->renderer, "img/bricks.png");
-    wall_stone_texture  = IMG_LoadTexture(context->renderer, "img/stone.png");
-    wall_steel_texture  = IMG_LoadTexture(context->renderer, "img/steel.png");
-    wall_blue_texture   = IMG_LoadTexture(context->renderer, "img/blue.png");
-
-    SDL_Surface* floor_surface = IMG_Load("img/floor.png");
-
-    for (int x = 0; x < 64; x++) {
-        for (int y = 0; y < 64; y++) {
-            Uint32 pixel = get_pixel(floor_surface, x, y);
-            pixel = correct_pixel(pixel, floor_surface);
-            floor_pixels[x + 64 * y] = pixel;
-        }
-    }
-    
-    floor_texture = SDL_CreateTextureFromSurface(context->renderer, floor_surface);
-    SDL_FreeSurface(floor_surface);
-}
-
-void free_texture() {
-    SDL_DestroyTexture(wall_bricks_texture);
-    SDL_DestroyTexture(wall_stone_texture);
-    SDL_DestroyTexture(wall_steel_texture);
-    SDL_DestroyTexture(wall_blue_texture);
-    SDL_DestroyTexture(floor_texture);
-}
-
-static SDL_Texture *get_wall_texture(WallType type) {
-    switch (type) {
-    case WALL_BRICKS:
-        return wall_bricks_texture;
-    case WALL_STONE:
-        return wall_stone_texture;
-    case WALL_STEEL:
-        return wall_steel_texture;
-    case WALL_BLUE:
-        return wall_blue_texture;
-    }
-}
-
-void print_sector(Sector * s)
-{
-    logg(DEBUG, "TAG : %d", s->tag);
-    logg(DEBUG, "CELL_HEIGHT : %d", s->cell_height);
-    logg(DEBUG, "FLOOR_HEIGHT : %d", s->floor_height);
-    logg(DEBUG, "BRIGHTNESS : %f", s->brightness);
-    logg(DEBUG, "FIRST_WALL : %d", s->first_wall);
-    logg(DEBUG, "WALLS_NUMBER : %d", s->walls_number);
-}
-
-void print_wall(Wall * w)
-{
-    logg(DEBUG, "START_X : %f", w->start_x);
-    logg(DEBUG, "END_X : %f", w->end_x);
-    logg(DEBUG, "START_Y : %f", w->start_y);
-    logg(DEBUG, "END_Y : %f", w->end_y);
-    logg(DEBUG, "PORTAL : %d", w->portal);
-}
-
 
 int load_level(const char* path)
 {
@@ -257,12 +149,13 @@ int load_level(const char* path)
     sector_number = sector_id;
     wall_number = wall_id;
 
+    logg(INFO, "Sector Number: %d", sector_number);
+    logg(INFO, "Wall Number  : %d", wall_number);
+
     fclose(level_file);
     return 0;
 }
 
-// Question : ne vaut-il pas mieux charger la texture entièrement puis adresser
-// un buffer ?
 static Uint32 get_pixel_from_texture(SDL_Texture *texture, int x, int y) {
     void* pixels;
     int pitch;
@@ -438,7 +331,7 @@ static int check_wall_distance_and_find_another(Wall* wall, Wall* actual_wall) {
 void render_wall(Wall *wall, Position *camera, Context *context)
 {
     const double EPS = 1e-6;         // tolérance numérique
-    
+    if (wall->portal >= 0) return; // portal to another sector
     // --- 1. Coordonnées murales relatives à la caméra ---
     double sx = wall->start_x - camera->x;
     double sy = wall->start_y - camera->y;
@@ -453,7 +346,6 @@ void render_wall(Wall *wall, Position *camera, Context *context)
     Wall actual_wall;
 
     // --- 3. Si point derrière la caméra => ne pas rendre ---
-    /* if (sx < 0 && ex < 0) return; */
     if (sx < NEAR_PLANE && ex < NEAR_PLANE) return;
     
     
@@ -494,10 +386,6 @@ void render_wall(Wall *wall, Position *camera, Context *context)
             continue;
         
         double wh = (((double) (col * (end_wall_height - start_wall_height)) / (double)(2 * wall_width)) + (double)start_wall_height / 2);
-
-        /* printf(" * * * \n"); */
-        /* printf("start wall height: %d\n", start_wall_height); */
-        /* printf("end wall height: %d\n", end_wall_height); */
         
         if (wh < EPS) continue;
         

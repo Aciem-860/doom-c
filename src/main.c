@@ -114,7 +114,7 @@ static void render_fps() {
 
 static int initialize_global() {
     init_logg(stdout, 1, ALL);
-    load_level("levels/level.map");
+    load_level("levels/level2.map");
     init_position(&player_position, FOV, WIDTH);
     tan_fov = tan(FOV/2);
 
