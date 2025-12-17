@@ -5,18 +5,13 @@
 #include "context.h"
 #include "player.h"
 #include "dynamic_array.h"
+#include "textures.h"
+#include "texture_types.h"
 
 #define MAX_NB_SECTORS 20
 #define MAX_NB_WALLS 100
 
 extern double tan_fov;
-
-typedef enum {
-    WALL_BRICKS,
-    WALL_STONE,
-    WALL_STEEL,
-    WALL_BLUE
-} WallType;
 
 typedef struct Wall {
     double start_x, end_x;
@@ -34,6 +29,7 @@ typedef struct Sector {
     int cell_height;
     int floor_height;
     double brightness;
+    FloorType floor_type;
     DynamicArray_int walls_id;
 } Sector;
 

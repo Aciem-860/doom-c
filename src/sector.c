@@ -91,6 +91,9 @@ int load_level(const char* path) {
                 case 3:
                     sector.brightness = atof(token);
                     break;
+                case 4:
+                    sector.floor_type = atoi(token);
+                    break;
                 default:
                     break;
                 }
@@ -168,22 +171,6 @@ int load_level(const char* path) {
     return 0;
 }
 
-static Uint32 get_pixel_from_texture(SDL_Texture *texture, int x, int y) {
-    void* pixels;
-    int pitch;
-
-    SDL_LockTexture(texture, NULL, &pixels, &pitch);
-
-    Uint8* base = (Uint8*)pixels;
-    Uint32* row = (Uint32*)(base + y * pitch);
-    Uint32 color = row[x];
-    printf("COLOR = %d\n", color);
-
-    SDL_UnlockTexture(texture);
-
-    return color;
-}
-
 static const double wall_height_real = 50.0; // TODO: remplacer par valeur du secteur
 
 static void render_col(Context *context, int x, int wh, int ww,
@@ -207,10 +194,17 @@ static void render_col(Context *context, int x, int wh, int ww,
     }
 }
 
+static int find_current_sector(Position *position) {
+    for (int s = 0; s < sector_number; s++) {
+        if (is_point_in_sector(position, &(sectors[s]))) {
+            return s;
+        }
+    }
+    return -1;
+}
 
-void render_floor(Context* context, Position* camera) {
-    int texture_width, texture_height;
-    SDL_QueryTexture(floor_texture, NULL, NULL, &texture_width, &texture_height);
+void render_floor(Context* context, Position* camera)
+{
     SDL_Texture* tex_floor_strip = SDL_CreateTexture(context->renderer,
                                                      SDL_PIXELFORMAT_ARGB8888,
                                                      SDL_TEXTUREACCESS_TARGET,
@@ -244,25 +238,38 @@ void render_floor(Context* context, Position* camera) {
         xr += camera->x;
         yr -= camera->y;
         yl -= camera->y;
-        
 
         // Taille du rayon perpendiculaire à la
         // direction de regard (rayon du faisceau)
 
         double step_x = (xr - xl) / context->width;
         double step_y = (yr - yl) / context->width;
-        
+
+        Position pos = { 0, 0 };
         for (int x = 0; x < context->width; x++) {
 
-            int x_ray = (int)(xl + x * step_x) % texture_width;
-            int y_ray = (int)(yl + x * step_y) % texture_height;
+            double x_real_world = (double)(xl + x * step_x);
+            double y_real_world = (double)(yl + x * step_y);
 
-            if (x_ray < 0) x_ray = (texture_width - x_ray) % texture_width;
-            if (y_ray < 0) y_ray = (texture_height - y_ray) % texture_height;
 
-            /* printf("X RAY = %d, Y RAY = %d\n", x_ray, y_ray); */
+            pos.x = x_real_world;
+            pos.y = -y_real_world;
+            
+            int in_sector = find_current_sector(&pos);
+            if (in_sector == -1) {
+                pixels_buffer[x + context->width * (int) y] = 0x000000;
+                continue;
+            }
 
-            pixels_buffer[x + context->width * (int) y] = floor_pixels[x_ray + texture_width * y_ray];
+            FloorTexture *floor_tex = get_floor_texture(sectors[in_sector].floor_type);
+            
+            int x_ray = (int)x_real_world % floor_tex->width;
+            int y_ray = (int)y_real_world % floor_tex->height;
+
+            if (x_ray < 0) x_ray = (floor_tex->width - x_ray) % floor_tex->width;
+            if (y_ray < 0) y_ray = (floor_tex->height - y_ray) % floor_tex->height;
+            
+            pixels_buffer[x + context->width * (int) y] = floor_tex->pixels[x_ray + floor_tex->width * y_ray];
         }
     }
     
@@ -284,8 +291,6 @@ static int get_projection(double x,
 {
     if (x < NEAR_PLANE) return 1; // SHOULD NOT HAPPEN
 
-    double angle = atan2(y, x);
-    
     *x_proj = (int)((y / x) * distance_to_screen);
     *wall_height = (distance_to_screen * wall_height_real / x);
     return 0;
@@ -381,7 +386,6 @@ static void render_wall(Wall *wall, Position *camera, Context *context)
     }
 
     int sx_d = sx_p + x_center;
-    int ex_d = ex_p + x_center;
     int wall_width = abs(ex_p - sx_p);
 
     if (wall_width <= 0) return;
@@ -462,7 +466,6 @@ void render_sector(Context *context, Position *camera, Sector *sector) {
 }
 
 void reset_visited_sectors() {
-    /* memset(visited_sectors, 0, sizeof(visited_sectors[0])); */
     for (int s = 0; s < MAX_NB_SECTORS; s++) {
         visited_sectors[s] = 0;
     }

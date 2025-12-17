@@ -96,10 +96,6 @@ static void render_floor_and_walls() {
     if (current_sector != -1) {
         render_sector(&context, &player_position, &sectors[current_sector]);
         reset_visited_sectors();
-    } else {
-        /* for (int s = 0; s < sector_number; s++) { */
-        /*     render_sector(&context, &player_position, &sectors[s]); */
-        /* }         */
     }
 }
 

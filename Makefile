@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -g -O3 -Iinclude -Ilogging-c
+CFLAGS = -g -O3 -Iinclude -Ilogging-c -Wall -Wpedantic
 LDFLAGS = -L/usr/lib -lSDL2 -lSDL2_image -lSDL2_ttf -lm
 SRC_DIR = src
 BUILD_DIR = build
