@@ -12,6 +12,7 @@
 #include <sys/param.h>
 
 #include "sector.h"
+#include "vector.h"
 #include "player.h"
 #include "textures.h"
 #include "context.h"
@@ -29,28 +30,24 @@ double tan_fov;
 enum parser_state { SECTOR, WALL };
 enum wall_cut_side { INTACT, LEFT, RIGHT };
 
-Sector sectors[10];
-Wall walls[10];
+Sector sectors[MAX_NB_SECTORS];
+Wall walls[MAX_NB_WALLS];
 
 int sector_number;
 int wall_number;
-int current_sector;
 
 Uint32 floor_pixels [64 * 64];
 
-int load_level(const char* path)
-{
+int load_level(const char* path) {
     FILE* level_file;
     level_file = fopen(path, "r");
 
     char line[100];
 
-
     enum parser_state state = SECTOR;
 
     int sector_id = 0;
     int wall_id = 0;
-
     int line_nb = 0;
     while (fgets(line, 100, level_file)) {
         if (line_nb == 0) {
@@ -67,6 +64,10 @@ int load_level(const char* path)
         if (strcmp(line, "[WALLS]\n") == 0) {
             state = WALL;
             goto Next;
+        }
+
+        if (strcmp(line, "\n") == 0 || line[0] == '#') {
+            continue;
         }
 
 
@@ -90,19 +91,19 @@ int load_level(const char* path)
                 case 3:
                     sector.brightness = atof(token);
                     break;
-                case 4:
-                    sector.first_wall = atoi(token);
-                    break;
-                case 5:
-                    sector.walls_number = atoi(token);
-                    break;
                 default:
-                    continue;
+                    break;
                 }
-
+                
                 token = strtok(NULL, " ");
                 tok_id++;
             }
+
+
+            DynamicArray_int walls_id = NewArray();
+            walls_id.values = NULL;
+            sector.walls_id = walls_id;
+           
             sectors[sector_id] = sector;
             sector_id++;
         }
@@ -130,6 +131,9 @@ int load_level(const char* path)
                 case 5:
                     wall.wall_type = toki;
                     break;
+                case 6:
+                    wall.sector = toki;
+                    break;
                 default:
                     continue;
                 }
@@ -138,6 +142,7 @@ int load_level(const char* path)
                 tok_id++;
             }
             walls[wall_id] = wall;
+            da_append(&(sectors[wall.sector].walls_id), wall_id);
             wall_id++;
         }
 
@@ -151,6 +156,13 @@ int load_level(const char* path)
 
     logg(INFO, "Sector Number: %d", sector_number);
     logg(INFO, "Wall Number  : %d", wall_number);
+
+    for (int sec = 0; sec < sector_number; sec++) {
+        logg(INFO, "< SECTOR %d >", sec);
+        for (size_t i = 0; i < sectors[sec].walls_id.count; i ++) {
+            logg(INFO, "   * Wall n°%d", sectors[sec].walls_id.values[i]);
+        }
+    }
 
     fclose(level_file);
     return 0;
@@ -328,7 +340,7 @@ static int check_wall_distance_and_find_another(Wall* wall, Wall* actual_wall) {
     return 1;    
 }
 
-void render_wall(Wall *wall, Position *camera, Context *context)
+static void render_wall(Wall *wall, Position *camera, Context *context)
 {
     const double EPS = 1e-6;         // tolérance numérique
     if (wall->portal >= 0) return; // portal to another sector
@@ -398,5 +410,60 @@ void render_wall(Wall *wall, Position *camera, Context *context)
 
         double u = (sx * y - sy * x) / det;
         render_col(context, screen_x, (int)(2*wh), real_wall_width, u, wall->wall_type);
+    }
+}
+
+typedef struct Point {
+    double x;
+    double y;
+} Point;
+
+/// Retourne 1 si le point est dans le sector, 0 sinon
+int is_point_in_sector(Position *position, Sector *sector) {
+    for (int w = 0; w < sector->walls_id.count; w++) {
+        Wall *wall = &(walls[sector->walls_id.values[w]]);
+        Point wall_start = { .x = wall->start_x, .y = wall->start_y };
+        Point wall_end = { .x = wall->end_x, .y = wall->end_y };
+        Point player = { .x = position->x, .y = position->y };
+
+        // FORMULE : det(Vi+1 - Vi, P - Vi) >= 0 ? Si oui continuer, sinon retourner 0
+        if (det(wall_end.x - wall_start.x, wall_end.y - wall_start.y, player.x - wall_start.x, player.y - wall_start.y) < 0) return 0;
+    }
+
+    return 1;
+}
+
+static unsigned int visited_sectors[MAX_NB_SECTORS] = { 0 };
+
+// TODO: écrire une fonction render_sector qui rend tous les murs appartenant à
+// un secteur. On cherche d'abord tous les murs qui sont des portails, et on
+// rend (récursivement) le secteur vers lequel pointe ce portail. En
+// dernier-lieu on traite le secteur courant.
+// On ne fait cela que sur les murs visibles (hélas cela n'inclus pas les murs
+// cachés par un mur, seuls ceux qui sortent de l'écran).
+void render_sector(Context *context, Position *camera, Sector *sector) {
+    /* logg(DEBUG, "CURRENTLY VISITING SECTOR NO.%d", sector->tag); */
+
+    // vérifier si un mur contient un portail (vers un secteur NON DÉJÀ TRAITÉ)
+    for (int w = 0; w < sector->walls_id.count; w++) {
+        Wall *wall = &(walls[sector->walls_id.values[w]]);
+
+        if (wall->portal == -1) continue;
+
+        if (!visited_sectors[wall->portal]) {
+            visited_sectors[wall->portal] = 1;
+            render_sector(context, camera, &sectors[wall->portal]);
+        }
+    }
+    
+    for (int w = 0; w < sector->walls_id.count; w++) {
+        render_wall(&(walls[sector->walls_id.values[w]]), camera, context);
+    }
+}
+
+void reset_visited_sectors() {
+    /* memset(visited_sectors, 0, sizeof(visited_sectors[0])); */
+    for (int s = 0; s < MAX_NB_SECTORS; s++) {
+        visited_sectors[s] = 0;
     }
 }

@@ -25,3 +25,7 @@ void get_intersect(double x1, double y1,
     *x = x1 + t * (x2 - x1);
     *y = y1 + t * (y2 - y1);
 }
+
+double det(double x1, double y1, double x2, double y2) {
+    return x1 * y2 - y1 * x2;
+}

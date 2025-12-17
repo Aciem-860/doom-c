@@ -36,6 +36,8 @@ FPS fps;
 Context context;
 Uint8 keyboard[SDL_NUM_SCANCODES];
 
+int current_sector = 0;
+
 static void update_keyboard(void)
 {
     SDL_Event event;
@@ -89,9 +91,15 @@ static int parse_keyboard() {
 
 static void render_floor_and_walls() {
     render_floor(&context, &player_position);
-        
-    for (int w = 0; w < wall_number; w++) {
-        render_wall(&walls[w], &player_position, &context);
+
+    // Only render the current sector
+    if (current_sector != -1) {
+        render_sector(&context, &player_position, &sectors[current_sector]);
+        reset_visited_sectors();
+    } else {
+        /* for (int s = 0; s < sector_number; s++) { */
+        /*     render_sector(&context, &player_position, &sectors[s]); */
+        /* }         */
     }
 }
 
@@ -114,7 +122,22 @@ static void render_fps() {
 
 static int initialize_global() {
     init_logg(stdout, 1, ALL);
-    load_level("levels/level2.map");
+    load_level("levels/level3.map");
+
+    {
+        for (int s = 0; s < sector_number; s++) {
+            logg(INFO, "< SECTOR %d >", s);
+            logg(INFO, "TAG: %d", sectors[s].tag);
+            logg(INFO, "WALLS CONNECTED TO: %d", sectors[s].walls_id.count);
+        }
+
+        for (int w = 0; w < wall_number; w++) {
+            logg(INFO, "< WALL %d >", w);
+            logg(INFO, "(%lf, %lf) -> (%lf, %lf)", walls[w].start_x, walls[w].start_y, walls[w].end_x, walls[w].end_y);
+            logg(INFO, "PORTAL -> %d", walls[w].portal);
+        }
+    }
+
     init_position(&player_position, FOV, WIDTH);
     tan_fov = tan(FOV/2);
 
@@ -146,8 +169,20 @@ static int initialize_global() {
     init_texture(&context);
     if(init_ttf()) return status;
     
-    init_fps(&fps, 60); // Aimed to 60 Hz
+    init_fps(&fps, 300); // Aimed to 60 Hz
     return 0;
+}
+
+/// Retourne 1 si aucun secteur n'est trouvé
+static int update_current_sector(Position *position) {
+    for (int s = 0; s < sector_number; s++) {
+        Sector *sector = &(sectors[s]);
+        if (is_point_in_sector(position, sector)) {
+            current_sector = s;
+            return 0;
+        }
+    }
+    return 1;
 }
 
 int main(void) {
@@ -156,6 +191,9 @@ int main(void) {
         status = EXIT_FAILURE;
         goto Quit;
     }
+
+    logg(INFO, "Current player sector: %d", current_sector);
+    int last_sector = current_sector;
     
     // --- MAIN LOOP --- //
     while (1) {
@@ -167,6 +205,16 @@ int main(void) {
         update_keyboard();
         if (parse_keyboard()) break;
 
+        if(update_current_sector(&player_position)) {
+            if (last_sector != -1)
+                logg(WARNING, "You are outside of any sector!");
+            last_sector = -1;
+            current_sector = -1;
+        }
+        if (last_sector != current_sector && current_sector != -1) {
+            logg(INFO, "Current player sector: %d", current_sector);
+            last_sector = current_sector;
+        }
         render_floor_and_walls();
         compute_fps(&fps);
         render_fps();
@@ -191,6 +239,11 @@ int main(void) {
     if (context.window)
         SDL_DestroyWindow(context.window);
     
+    if (status == EXIT_SUCCESS) {
+        for (int s = 0; s < sector_number; s++) {
+            da_free(&(sectors[s].walls_id));
+        }
+    }    
     
     SDL_Quit();
     return status;

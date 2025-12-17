@@ -5,8 +5,8 @@
 Position player_position;
 
 void init_position(Position * p, double fov, double screen_width) {
-    p->x = 0.0;
-    p->y = 0.0;
+    p->x = 50.0;
+    p->y = 50.0;
     p->angle = 0.0;
     p->fov = fov;
     p->distance_to_screen = screen_width / (2 * tan(fov/2));
