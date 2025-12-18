@@ -5,7 +5,6 @@
 #include "context.h"
 #include "player.h"
 #include "dynamic_array.h"
-#include "textures.h"
 #include "texture_types.h"
 
 #define MAX_NB_SECTORS 20
@@ -41,7 +40,7 @@ extern int sector_number;
 extern int wall_number;
 
 void init_texture(Context *context);
-void free_texture();
+void free_texture(void);
 int load_level(const char *path);
 
 void print_sector(Sector *);

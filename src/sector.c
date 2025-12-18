@@ -24,8 +24,10 @@
         (x) ^= (y);                             \
     } while(0)
 
-const double NEAR_PLANE = 1.0;
+const double NEAR_PLANE = 1;
 double tan_fov;
+
+double z_pos;
 
 enum parser_state { SECTOR, WALL };
 enum wall_cut_side { INTACT, LEFT, RIGHT };
@@ -174,25 +176,28 @@ int load_level(const char* path) {
 static const double wall_height_real = 50.0; // TODO: remplacer par valeur du secteur
 
 static void render_col(Context *context, int x, int wh, int ww,
-                       double percent, WallType wall_type)
+                       double percent, WallType wall_type, double distance)
 {
-    if (wh > 0) {
-        int texture_width;
-        int texture_height;
-        
-        SDL_Texture* wall_texture = get_wall_texture(wall_type);
-        SDL_QueryTexture(wall_texture, NULL, NULL, &texture_width, &texture_height);
-        
-        int wall_col = (int) (percent * ww);
-
-        int texture_col = wall_col % texture_width;
-        
-        SDL_Rect src_rect = { texture_col, 0, 1, texture_height };
-        SDL_Rect dst_rect = { x, (context->height -  wh)/2, 1, wh+1 };
-
-        SDL_RenderCopy(context->renderer, wall_texture, &src_rect, &dst_rect);
+    if (wh <= 0 || distance < 1e-9) {
+        return;
     }
+
+    int texture_width, texture_height;
+    SDL_Texture* wall_texture = get_wall_texture(wall_type);
+    SDL_QueryTexture(wall_texture, NULL, NULL, &texture_width, &texture_height);
+
+    int wall_col = (int)(percent * ww);
+    int texture_col = wall_col % texture_width;
+
+    int y_low = distance;
+    int y_high = y_low - wh;
+
+    SDL_Rect src_rect = { texture_col, 0, 1, texture_height };
+    SDL_Rect dst_rect = { x, y_high, 1, wh };
+
+    SDL_RenderCopy(context->renderer, wall_texture, &src_rect, &dst_rect);
 }
+
 
 static int find_current_sector(Position *position) {
     for (int s = 0; s < sector_number; s++) {
@@ -210,9 +215,8 @@ void render_floor(Context* context, Position* camera)
                                                      SDL_TEXTUREACCESS_TARGET,
                                                      context->width,
                                                      context->height/2);
-
+    z_pos = 20 * context->height;
     Uint32 pixels_buffer[context->width * context->height/2];
-    double z_pos = 19 * (double) context->height;
     
     for (int line = context->height/2+1; line < context->height; line++) {
 
@@ -283,17 +287,14 @@ void render_floor(Context* context, Position* camera)
     SDL_DestroyTexture(tex_floor_strip);        
 }
 
-static int get_projection(double x,
-                          double y,
-                          double distance_to_screen,
-                          int* x_proj,
-                          int* wall_height)
+static void get_projection(double x,
+                           double y,
+                           double distance_to_screen,
+                           int* x_proj,
+                           int* wall_height)
 {
-    if (x < NEAR_PLANE) return 1; // SHOULD NOT HAPPEN
-
     *x_proj = (int)((y / x) * distance_to_screen);
     *wall_height = (distance_to_screen * wall_height_real / x);
-    return 0;
 }
 
 
@@ -302,120 +303,111 @@ static int get_projection(double x,
 /// Si aucun point n'est trouvé, alors cela signifie que le mur est trop proche
 /// du début à la fin et qu'il ne faut pas tenter de l'afficher à l'écran.
 /// Renvoie 1 le cas échéant, 0 si un point a été trouvé.
-static int check_wall_distance_and_find_another(Wall* wall, Wall* actual_wall) {
-    double sx, ex, sy, ey;
-    
-    if (wall->start_x < NEAR_PLANE && wall->end_x < NEAR_PLANE) {
-        return 1;
-    } else if (wall->start_x < NEAR_PLANE && wall->end_x > NEAR_PLANE) {
-        sx = wall->start_x;
-        sy = wall->start_y;
-        ex = wall->end_x;
-        ey = wall->end_y;
-        
-    } else if (wall->start_x > NEAR_PLANE && wall->end_x < NEAR_PLANE) {
-        // End est OK mais pas Start
-        // On part de START
-        sx = wall->end_x;
-        sy = wall->end_y;
-        ex = wall->start_x;
-        ey = wall->start_y;
-    } else {
-        // Les deux sont OK, on n'a rien à faire
-        memcpy(actual_wall, wall, sizeof(*wall));
-        return 0;
-    } 
-    
-    double step = 0.05;
-    int mx = (int) (1.0 / step);
-    for (int i = 0; i < mx + 1; i++) {
-        double t = step * i; // t inclus dans [0,1]
-        int x = (int) (sx + t * (ex - sx));
-        int y = (int) (sy + t * (ey - sy));
+static int clip_wall_to_screen(Wall *in, Wall *out)
+{
+    double sx = in->start_x, sy = in->start_y;
+    double ex = in->end_x,   ey = in->end_y;
 
-        if (x < NEAR_PLANE) continue;
-            
-        actual_wall->start_x = x;
-        actual_wall->start_y = y;
-        actual_wall->end_x = ex;
-        actual_wall->end_y = ey;
+    if (sx >= NEAR_PLANE && ex >= NEAR_PLANE) {
+        memcpy(out, in, sizeof(*in));
         return 0;
     }
-    // Le mur est clairement trop proche pour être affiché
-    return 1;    
+
+    if (sx < NEAR_PLANE && ex < NEAR_PLANE) {
+        return 1; // totalement invisible
+    }
+
+    double t = (NEAR_PLANE - sx) / (ex - sx);
+
+    double ix = sx + t * (ex - sx);
+    double iy = sy + t * (ey - sy);
+
+    *out = *in;
+    if (sx < NEAR_PLANE) {
+        out->start_x = ix;
+        out->start_y = iy;
+    } else {
+        out->end_x = ix;
+        out->end_y = iy;
+    }
+
+    return 0;
 }
 
 static void render_wall(Wall *wall, Position *camera, Context *context)
 {
-    const double EPS = 1e-6;         // tolérance numérique
-    if (wall->portal >= 0) return; // portal to another sector
+    const double EPS = 1e-9;
+
+    if (wall->portal >= 0) return; // portail → rendu dans render_sector
+
     // --- 1. Coordonnées murales relatives à la caméra ---
     double sx = wall->start_x - camera->x;
     double sy = wall->start_y - camera->y;
     double ex = wall->end_x   - camera->x;
     double ey = wall->end_y   - camera->y;
-    
-    // --- 2. Rotation : mettre la caméra dans l'axe X+ (direction caméra = (1,0)) ---
+
+    // --- 2. Rotation pour aligner caméra sur X+ ---
     rotate(sx, sy, -camera->angle, &sx, &sy);
     rotate(ex, ey, -camera->angle, &ex, &ey);
 
     Wall rotated_wall = { sx, ex, sy, ey };
     Wall actual_wall;
 
-    // --- 3. Si point derrière la caméra => ne pas rendre ---
-    if (sx < NEAR_PLANE && ex < NEAR_PLANE) return;
-    
-    
-    // --- 4. Projection sur l'écran ---
-    double x_center = (double)context->width / 2.0;
-
-    int sx_p, ex_p;
-    int start_wall_height, end_wall_height;
-
-    if (check_wall_distance_and_find_another(&rotated_wall, &actual_wall)) return;
-    if (get_projection(actual_wall.start_x, actual_wall.start_y,
-                       camera->distance_to_screen, &sx_p, &start_wall_height)) return;
-    if (get_projection(actual_wall.end_x, actual_wall.end_y,
-                       camera->distance_to_screen, &ex_p, &end_wall_height)) return;
-
-    // --- 5. Tracer le mur ---
-
-    if (sx_p > ex_p) {
-        swap(sx_p, ex_p);
-        swap(start_wall_height, end_wall_height);
+    // --- 3. Clipping near-plane ---
+    if (clip_wall_to_screen(&rotated_wall, &actual_wall)) {
+        return;
     }
 
-    int sx_d = sx_p + x_center;
-    int wall_width = abs(ex_p - sx_p);
+    // --- 4. Utilisation de la tangente du début/fin du mur ---
+    // ---    pour estimer si un mur sort de l'écran ou pas  ---
+    double tan_left  = actual_wall.start_y / actual_wall.start_x;
+    double tan_right = actual_wall.end_y / actual_wall.end_x;
+    if (tan_left > tan_fov && tan_right > tan_fov) return;
+    if (tan_left < -tan_fov && tan_right < -tan_fov) return;
 
+    // --- 5. Projection ---
+    int sx_p, ex_p, start_wall_height, end_wall_height;
+    get_projection(actual_wall.start_x, actual_wall.start_y, camera->distance_to_screen, &sx_p, &start_wall_height);
+    get_projection(actual_wall.end_x,   actual_wall.end_y,   camera->distance_to_screen, &ex_p, &end_wall_height);
+
+    double x_center = (double)context->width / 2.0;
+    int sx_screen = sx_p + x_center;
+    int ex_screen = ex_p + x_center;
+
+    int wall_width = ex_screen - sx_screen;
     if (wall_width <= 0) return;
 
-    double wx = ex - sx;
-    double wy = ey - sy;
+    // --- 5. Boucle sur les colonnes ---
+    double wx = actual_wall.end_x - actual_wall.start_x;
+    double wy = actual_wall.end_y - actual_wall.start_y;
+    double real_wall_width = sqrt(wx*wx + wy*wy);
 
-    double real_wall_width = sqrt(wx * wx + wy * wy);
-    
+    double start_distance = (double)context->height/2 + z_pos/actual_wall.start_x;
+    double end_distance   = (double)context->height/2 + z_pos/actual_wall.end_x;
+
     for (int col = 0; col < wall_width; col++) {
-        int screen_x = col + sx_d;
-        
-        if (screen_x < 0 || screen_x >= context->width)
-            continue;
-        
-        double wh = (((double) (col * (end_wall_height - start_wall_height)) / (double)(2 * wall_width)) + (double)start_wall_height / 2);
-        
-        if (wh < EPS) continue;
-        
+        double t = (double)col / wall_width;
+        int screen_x = sx_screen + col;
+
+        if (screen_x < 0 || screen_x >= context->width) continue;
+
+        double wall_height = start_wall_height + t * (end_wall_height - start_wall_height);
+        if (wall_height < EPS) continue;
+
+        double distance = start_distance + t * (end_distance - start_distance);
         double x = camera->distance_to_screen;
         double y = sx_p + col;
 
-
         double det = x * wy - y * wx;
-        if (fabs(det) < 1e-9) return;
+        if (fabs(det) < EPS) continue;
 
         double u = (sx * y - sy * x) / det;
-        render_col(context, screen_x, (int)(2*wh), real_wall_width, u, wall->wall_type);
+        if (u < 0.0 || u > real_wall_width) continue;
+
+        render_col(context, screen_x, (int)wall_height, real_wall_width, u, wall->wall_type, distance);
     }
 }
+
 
 typedef struct Point {
     double x;
@@ -439,16 +431,8 @@ int is_point_in_sector(Position *position, Sector *sector) {
 
 static unsigned int visited_sectors[MAX_NB_SECTORS] = { 0 };
 
-// TODO: écrire une fonction render_sector qui rend tous les murs appartenant à
-// un secteur. On cherche d'abord tous les murs qui sont des portails, et on
-// rend (récursivement) le secteur vers lequel pointe ce portail. En
-// dernier-lieu on traite le secteur courant.
-// On ne fait cela que sur les murs visibles (hélas cela n'inclus pas les murs
-// cachés par un mur, seuls ceux qui sortent de l'écran).
 void render_sector(Context *context, Position *camera, Sector *sector) {
-    /* logg(DEBUG, "CURRENTLY VISITING SECTOR NO.%d", sector->tag); */
-
-    // vérifier si un mur contient un portail (vers un secteur NON DÉJÀ TRAITÉ)
+    // Vérifier si un mur contient un portail (vers un secteur NON DÉJÀ TRAITÉ)
     for (int w = 0; w < sector->walls_id.count; w++) {
         Wall *wall = &(walls[sector->walls_id.values[w]]);
 
@@ -459,13 +443,14 @@ void render_sector(Context *context, Position *camera, Sector *sector) {
             render_sector(context, camera, &sectors[wall->portal]);
         }
     }
+
     
     for (int w = 0; w < sector->walls_id.count; w++) {
         render_wall(&(walls[sector->walls_id.values[w]]), camera, context);
     }
 }
 
-void reset_visited_sectors() {
+void reset_visited_sectors(void) {
     for (int s = 0; s < MAX_NB_SECTORS; s++) {
         visited_sectors[s] = 0;
     }
